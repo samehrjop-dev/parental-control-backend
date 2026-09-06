@@ -208,6 +208,7 @@ app.post('/api/telemetry/messages', (req, res) => {
   }
 
   if (db.messages.length > 500) db.messages = db.messages.slice(0, 500);
+  db.messages.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
   saveData();
   res.json({ status: 'ok' });
 });
