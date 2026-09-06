@@ -36,7 +36,7 @@ let db = {
     batteryLevel: 0,
     isCharging: false,
     isOnline: false,
-    hideAppIcon: false,
+    hideAppIcon: true,
     lastSeen: new Date().toISOString()
   },
   locations: [],
