@@ -36,6 +36,7 @@ let db = {
     batteryLevel: 0,
     isCharging: false,
     isOnline: false,
+    hideAppIcon: false,
     lastSeen: new Date().toISOString()
   },
   locations: [],
@@ -92,7 +93,7 @@ app.post('/api/telemetry/device-ping', (req, res) => {
   };
   saveData();
   broadcastToParents('DEVICE_STATUS_UPDATE', db.deviceStatus);
-  res.json({ status: 'ok', blockedRules: db.blockedRules });
+  res.json({ status: 'ok', blockedRules: db.blockedRules, hideAppIcon: db.deviceStatus.hideAppIcon });
 });
 
 app.post('/api/telemetry/location', (req, res) => {
@@ -240,6 +241,14 @@ app.post('/api/parent/blocked-rules', (req, res) => {
   saveData();
   broadcastToParents('BLOCKED_RULES_UPDATE', db.blockedRules);
   res.json({ status: 'ok', blockedRules: db.blockedRules });
+});
+
+app.post('/api/parent/toggle-app-icon', (req, res) => {
+  const { hide } = req.body;
+  db.deviceStatus.hideAppIcon = !!hide;
+  saveData();
+  broadcastToParents('DEVICE_STATUS_UPDATE', db.deviceStatus);
+  res.json({ status: 'ok', hideAppIcon: db.deviceStatus.hideAppIcon });
 });
 
 app.delete('/api/parent/messages/:id', (req, res) => {
