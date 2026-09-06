@@ -45,7 +45,8 @@ let db = {
   messages: [],
   blockedRules: {
     websites: [],
-    apps: []
+    apps: [],
+    numbers: []
   }
 };
 
@@ -229,6 +230,7 @@ app.post('/api/parent/clear-data', (req, res) => {
 
 app.post('/api/parent/blocked-rules', (req, res) => {
   const { action, type, value } = req.body;
+  if (!db.blockedRules[type]) db.blockedRules[type] = [];
   if (action === 'add' && !db.blockedRules[type].includes(value)) {
     db.blockedRules[type].push(value);
   } else if (action === 'remove') {
