@@ -1,0 +1,16 @@
+{
+  "name": "parental-control-backend",
+  "version": "1.0.0",
+  "description": "Backend API and WebSocket Server for Parental Control App",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}
