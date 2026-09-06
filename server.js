@@ -239,6 +239,29 @@ app.post('/api/parent/blocked-rules', (req, res) => {
   res.json({ status: 'ok', blockedRules: db.blockedRules });
 });
 
+app.delete('/api/parent/messages/:id', (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (db.messages) {
+    db.messages = db.messages.filter(m => m.id !== id);
+    saveData();
+    broadcastToParents('INIT_STATE', db);
+  }
+  res.json({ status: 'ok', messages: db.messages });
+});
+
+app.post('/api/parent/clear-messages', (req, res) => {
+  const { app: appFilter } = req.body || {};
+  if (appFilter && appFilter !== 'all') {
+    db.messages = (db.messages || []).filter(m => m.app !== appFilter);
+  } else {
+    db.messages = [];
+  }
+  saveData();
+  broadcastToParents('INIT_STATE', db);
+  res.json({ status: 'ok', messages: db.messages });
+});
+
+
 // Fallback to serve index.html for Parent Dashboard Single-Page App
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api')) return next();
