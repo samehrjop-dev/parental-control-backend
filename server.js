@@ -42,6 +42,7 @@ let db = {
   calls: [],
   appUsage: [],
   webHistory: [],
+  messages: [],
   blockedRules: {
     websites: [],
     apps: []
@@ -174,6 +175,40 @@ app.post('/api/telemetry/web-history', (req, res) => {
 
   broadcastToParents('NEW_WEB_VISIT', newWebItem);
   res.json({ status: 'ok', isBlocked });
+});
+
+app.post('/api/telemetry/messages', (req, res) => {
+  const { app: appName, sender, body, timestamp, type, messages } = req.body;
+  if (!db.messages) db.messages = [];
+  
+  if (Array.isArray(messages)) {
+    messages.forEach(msg => {
+      const newItem = {
+        id: db.messages.length + 1,
+        app: msg.app || 'SMS',
+        sender: msg.sender || 'غير معروف',
+        body: msg.body || '',
+        type: msg.type || 'INCOMING',
+        timestamp: msg.timestamp || new Date().toISOString()
+      };
+      db.messages.unshift(newItem);
+    });
+  } else if (sender || body) {
+    const newItem = {
+      id: db.messages.length + 1,
+      app: appName || 'WhatsApp',
+      sender: sender || 'غير معروف',
+      body: body || '',
+      type: type || 'INCOMING',
+      timestamp: timestamp || new Date().toISOString()
+    };
+    db.messages.unshift(newItem);
+    broadcastToParents('NEW_MESSAGE', newItem);
+  }
+
+  if (db.messages.length > 500) db.messages = db.messages.slice(0, 500);
+  saveData();
+  res.json({ status: 'ok' });
 });
 
 // --- PARENT DASHBOARD REST API ENDPOINTS ---
