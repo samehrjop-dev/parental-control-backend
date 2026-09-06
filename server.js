@@ -17,16 +17,16 @@ app.use('/api', (req, res, next) => {
   next();
 });
 
-// Serve built Parent Web Dashboard directly from root URL
-const distPath = path.join(__dirname, '../parent-dashboard/dist');
-if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
+// Serve built Parent Web Dashboard directly from public folder
+const publicPath = path.join(__dirname, 'public');
+if (fs.existsSync(publicPath)) {
+  app.use(express.static(publicPath));
 }
 
 // Data Store File Path
 const DATA_FILE = path.join(__dirname, 'data_store.json');
 
-// Initialize empty DB structure for real child data
+// Initialize DB structure for child data
 let db = {
   deviceStatus: {
     deviceId: 'child-device',
@@ -204,15 +204,22 @@ app.post('/api/parent/blocked-rules', (req, res) => {
   res.json({ status: 'ok', blockedRules: db.blockedRules });
 });
 
-// Fallback to serve index.html for single-page dashboard app
-if (fs.existsSync(distPath)) {
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
+// Fallback to serve index.html for Parent Dashboard Single-Page App
+app.get('*', (req, res, next) => {
+  if (req.path.startsWith('/api')) return next();
+  const indexPath = path.join(__dirname, 'public', 'index.html');
+  if (fs.existsSync(indexPath)) {
+    return res.sendFile(indexPath);
+  }
+  res.send('Parental Control Backend Server is Running');
+});
+
+// Start Server on 0.0.0.0 (all network interfaces) if run directly
+if (require.main === module) {
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`Parental Control Backend & UI running on http://0.0.0.0:${PORT}`);
+    console.log(`WebSocket Server ready on ws://0.0.0.0:${PORT}`);
   });
 }
 
-// Start Server on 0.0.0.0 (all network interfaces)
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Parental Control Backend & UI running on http://0.0.0.0:${PORT}`);
-  console.log(`WebSocket Server ready on ws://0.0.0.0:${PORT}`);
-});
+module.exports = app;
