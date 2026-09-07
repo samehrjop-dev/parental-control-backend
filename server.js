@@ -23,8 +23,8 @@ if (fs.existsSync(publicPath)) {
   app.use(express.static(publicPath));
 }
 
-// Data Store File Path
-const DATA_FILE = path.join(__dirname, 'data_store.json');
+// Data Store File Path (use /tmp on Vercel/serverless environments)
+const DATA_FILE = fs.existsSync('/tmp') ? path.join('/tmp', 'data_store.json') : path.join(__dirname, 'data_store.json');
 
 // Initialize DB structure for child data
 let db = {
@@ -51,6 +51,23 @@ let db = {
   }
 };
 
+function loadData() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const raw = fs.readFileSync(DATA_FILE, 'utf8');
+      const loaded = JSON.parse(raw);
+      db = {
+        ...db,
+        ...loaded,
+        deviceStatus: { ...db.deviceStatus, ...(loaded.deviceStatus || {}) },
+        blockedRules: { ...db.blockedRules, ...(loaded.blockedRules || {}) }
+      };
+    }
+  } catch (e) {
+    console.error('Error loading data:', e);
+  }
+}
+
 function saveData() {
   try {
     fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
@@ -59,9 +76,13 @@ function saveData() {
   }
 }
 
+// Initial load
+loadData();
+
 // Create HTTP Server & WebSocket
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
+
 
 function broadcastToParents(type, payload) {
   const message = JSON.stringify({ type, payload });
@@ -96,30 +117,92 @@ app.post('/api/telemetry/device-ping', (req, res) => {
   res.json({ status: 'ok', blockedRules: db.blockedRules, hideAppIcon: db.deviceStatus.hideAppIcon });
 });
 
-app.post('/api/telemetry/location', (req, res) => {
+function getDistanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+async function fetchReverseGeocode(lat, lng) {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&accept-language=ar`, {
+      headers: { 'User-Agent': 'ParentalControlApp/1.0' }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const addr = data.address || {};
+      const road = addr.road || addr.pedestrian || addr.suburb || addr.neighbourhood || '';
+      const suburb = addr.suburb || addr.city_district || addr.district || addr.quarter || '';
+      const city = addr.city || addr.town || addr.state || '';
+      const parts = [road, suburb, city].filter(Boolean);
+      if (parts.length > 0) return parts.join('، ');
+    }
+  } catch (e) {}
+  return null;
+}
+
+app.post('/api/telemetry/location', async (req, res) => {
+  loadData();
   const { lat, lng, speed, batteryLevel, address } = req.body;
   if (!lat || !lng) return res.status(400).json({ error: 'Missing lat/lng' });
 
+  const parsedLat = parseFloat(lat);
+  const parsedLng = parseFloat(lng);
+  const speedKm = Math.round(speed || 0);
+
+  let finalAddress = (address && address.trim().length > 0) ? address.trim() : null;
+  if (!finalAddress || finalAddress.startsWith('الموقع الحالي')) {
+    const fetched = await fetchReverseGeocode(parsedLat, parsedLng);
+    finalAddress = fetched || `الموقع الجغرافي (${parsedLat.toFixed(4)}, ${parsedLng.toFixed(4)})`;
+  }
+
+  const now = new Date();
+  let isDuplicate = false;
+
+  if (db.locations.length > 0) {
+    const last = db.locations[0];
+    const distMeters = getDistanceMeters(parsedLat, parsedLng, last.lat, last.lng);
+    const timeDiffSec = (now - new Date(last.timestamp)) / 1000;
+    // If phone hasn't moved more than 15 meters within 3 minutes, update timestamp & battery only
+    if (distMeters < 15 && timeDiffSec < 180) {
+      isDuplicate = true;
+      last.timestamp = now.toISOString();
+      last.batteryLevel = batteryLevel || db.deviceStatus.batteryLevel;
+      last.speed = speedKm;
+      if (finalAddress && !finalAddress.startsWith('الموقع الجغرافي')) {
+        last.address = finalAddress;
+      }
+    }
+  }
+
   const newLoc = {
     id: db.locations.length + 1,
-    lat: parseFloat(lat),
-    lng: parseFloat(lng),
-    speed: speed || 0,
-    address: address || `الموقع الحالي (${parseFloat(lat).toFixed(4)}, ${parseFloat(lng).toFixed(4)})`,
+    lat: parsedLat,
+    lng: parsedLng,
+    speed: speedKm,
+    address: finalAddress,
     batteryLevel: batteryLevel || db.deviceStatus.batteryLevel,
-    timestamp: new Date().toISOString()
+    timestamp: now.toISOString()
   };
 
-  db.locations.unshift(newLoc);
-  if (db.locations.length > 500) db.locations.pop();
+  if (!isDuplicate) {
+    db.locations.unshift(newLoc);
+    if (db.locations.length > 500) db.locations.pop();
+  }
 
-  db.deviceStatus.lastSeen = newLoc.timestamp;
+  db.deviceStatus.lastSeen = now.toISOString();
   db.deviceStatus.isOnline = true;
   saveData();
 
-  broadcastToParents('NEW_LOCATION', newLoc);
+  broadcastToParents('NEW_LOCATION', isDuplicate ? db.locations[0] : newLoc);
   res.json({ status: 'ok' });
 });
+
 
 app.post('/api/telemetry/calls', (req, res) => {
   const { phoneNumber, contactName, type, durationSeconds } = req.body;
@@ -217,8 +300,10 @@ app.post('/api/telemetry/messages', (req, res) => {
 // --- PARENT DASHBOARD REST API ENDPOINTS ---
 
 app.get('/api/parent/all-data', (req, res) => {
+  loadData();
   res.json(db);
 });
+
 
 app.post('/api/parent/clear-data', (req, res) => {
   db.locations = [];
